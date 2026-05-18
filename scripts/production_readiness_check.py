@@ -1,4 +1,3 @@
-# scripts/production_readiness_check.py
 import requests, redis, subprocess
 
 results = {}
@@ -22,7 +21,7 @@ print("\n=== OBSERVABILITY ===")
 check("Prometheus up", lambda:
     requests.get("http://localhost:9090/-/healthy").raise_for_status())
 check("Grafana up", lambda:
-    requests.get("http://localhost:3000/api/health").raise_for_status())
+    requests.get("http://localhost:13000/api/health").raise_for_status())
 check("Metrics endpoint exposed", lambda:
     requests.get("http://localhost:8000/metrics").raise_for_status())
 
@@ -35,22 +34,30 @@ check("Unauthorized request rejected", check_unauthorized)
 
 print("\n=== VECTOR STORE ===")
 check("Qdrant healthy", lambda:
-    requests.get("http://localhost:6333/healthz").raise_for_status())
+    requests.get("http://localhost:16333/healthz").raise_for_status())
 
 def check_collection_exists():
-    r = requests.get("http://localhost:6333/collections/documents")
+    r = requests.get("http://localhost:16333/collections/documents")
     r.raise_for_status()
 
 check("Collection exists", check_collection_exists)
 
 print("\n=== FEATURE STORE ===")
 check("Redis reachable", lambda:
-    redis.Redis(host="localhost", port=6379).ping())
+    redis.Redis(host="localhost", port=16379).ping())
 
 print("\n=== KAFKA ===")
 def check_kafka_topics():
+    container_cmd = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}"],
+        capture_output=True, text=True
+    )
+    names = container_cmd.stdout.strip().split("\n")
+    kafka_container = next((name for name in names if "kafka" in name), None)
+    if not kafka_container:
+        raise RuntimeError("Kafka container not found")
     result = subprocess.run(
-        ["docker", "exec", "lab28-kafka-1", "kafka-topics", "--list",
+        ["docker", "exec", kafka_container, "kafka-topics", "--list",
          "--bootstrap-server", "localhost:9092"],
         capture_output=True, text=True
     )
@@ -58,7 +65,6 @@ def check_kafka_topics():
 
 check("Kafka topics exist", check_kafka_topics)
 
-# Tổng kết
 passed = sum(1 for v in results.values() if v == "PASS")
 total = len(results)
 score = (passed / total) * 100

@@ -18,13 +18,16 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
   # ── Prefect ───────────────────────────────────────────────
   prefect-orion:
     image: prefecthq/prefect:2.14.0-python3.10
-    command: prefect orion start --host 0.0.0.0
+    command: prefect server start --host 0.0.0.0
     ports:
       - "4200:4200"
     volumes:
@@ -32,7 +35,7 @@ services:
 
   prefect-worker:
     image: prefecthq/prefect:2.14.0-python3.10
-    command: prefect worker start -p docker -n lab28-worker
+    command: sh -c "pip install kafka-python pandas pyarrow && prefect worker start -p docker -n lab28-worker"
     environment:
       PREFECT_API_URL: http://prefect-orion:4200/api
     volumes:
@@ -45,7 +48,7 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6333:6333"
+      - "16333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -53,7 +56,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "16379:6379"
 
   # ── Monitoring Stack ──────────────────────────────────────
   prometheus:
@@ -67,7 +70,7 @@ services:
     image: grafana/grafana:latest
     depends_on: [prometheus]
     ports:
-      - "3000:3000"
+      - "13000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
 
@@ -77,10 +80,19 @@ services:
     ports:
       - "8000:8000"
     environment:
-      VLLM_URL: ${VLLM_NGROK_URL}
+      VLLM_URL: http://mock-colab:8001
       QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379
-    depends_on: [qdrant, redis]
+    depends_on: [qdrant, redis, mock-colab]
+
+  mock-colab:
+    image: python:3.10-slim
+    volumes:
+      - ./mock_colab.py:/app/mock_colab.py
+    working_dir: /app
+    command: sh -c "pip install fastapi pydantic uvicorn && uvicorn mock_colab:app --host 0.0.0.0 --port 8001"
+    ports:
+      - "8001:8001"
 
 volumes:
   prefect_data:
